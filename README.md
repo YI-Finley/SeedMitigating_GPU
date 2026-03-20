@@ -1,69 +1,71 @@
-# SeedMitigating GPU/SLURM Port
+# SeedMitigating GPU/SLURM 版本
 
-This repository is a GPU/SLURM-ready port of the original `SeedMitigating` project. It is prepared for CUDA GPUs, A100 nodes, and your school cluster workflow.
+这是原始 `SeedMitigating` 项目的一个 GPU 化改写版本，目标是让它能够在 CUDA GPU 和 SLURM 集群环境下运行，尤其适合你学校的 A100 节点工作流。
 
-Use the new launchers under [gpu](gpu) and the ready-made SLURM templates under [slurm](slurm). The original NPU-oriented notes were preserved in [README_NPU_ORIGINAL.md](README_NPU_ORIGINAL.md).
+建议优先使用新增的 [gpu](gpu) 启动脚本和 [slurm](slurm) 里的 `sbatch` 模板。原始 NPU 说明保存在 [README_NPU_ORIGINAL.md](README_NPU_ORIGINAL.md)。
 
-## What This Version Changes
+## 这个版本做了什么
 
-- Adds GPU-safe training and evaluation launchers under [gpu](gpu)
-- Adds SLURM templates for your A100 cluster under [slurm](slurm)
-- Makes the main evaluation Python entrypoints accept both `cuda:*` and `npu:*`
-- Adds cluster-facing setup notes in [ENV_SETUP_GPU.md](ENV_SETUP_GPU.md)
-- Keeps the original project structure so the paper scripts and data are still easy to map
+- 新增了 GPU 版训练和评估入口，放在 [gpu](gpu)
+- 新增了适合 A100 集群的 SLURM 模板，放在 [slurm](slurm)
+- 主评估脚本已经支持 `cuda:*` 和 `npu:*`
+- 增加了 GPU 环境说明：[ENV_SETUP_GPU.md](ENV_SETUP_GPU.md)
+- 增加了集群使用说明：[GPU_CLUSTER_GUIDE.md](GPU_CLUSTER_GUIDE.md)
 
-## Repository Layout
+## 目录说明
 
-- [gpu](gpu): new GPU-first train/eval wrappers
-- [slurm](slurm): `sbatch` templates
-- [rl](rl): core paper training scripts and evaluation generators
-- [scripts](scripts): model evaluation entrypoints
-- [data](data): datasets used by the paper reproduction flow
-- [ENV_SETUP_GPU.md](ENV_SETUP_GPU.md): environment setup notes
-- [GPU_CLUSTER_GUIDE.md](GPU_CLUSTER_GUIDE.md): cluster-specific notes
+- [gpu](gpu)：GPU 优先的训练/评估封装脚本
+- [slurm](slurm)：可直接改后提交的 `sbatch` 模板
+- [rl](rl)：论文核心训练脚本和图表生成逻辑
+- [scripts](scripts)：模型评估主入口
+- [data](data)：论文复现用到的数据
+- [ENV_SETUP_GPU.md](ENV_SETUP_GPU.md)：环境配置说明
+- [GPU_CLUSTER_GUIDE.md](GPU_CLUSTER_GUIDE.md)：集群运行说明
 
-## Quick Start
+## 最短上手流程
 
-If you only want the shortest working path, do this:
+如果你只想按最短路径跑起来，建议按这个顺序：
 
-1. Upload this repo to your cluster at:
+1. 把项目放到集群上：
    `/home/comp/23481501/datasets/SeedMitigating_GPU`
-2. Create the dedicated virtualenv described in [ENV_SETUP_GPU.md](ENV_SETUP_GPU.md)
-3. Verify the environment:
-   ```bash
-   source /home/comp/23481501/venvs/seedmitigating-gpu/bin/activate
-   export PYTHONNOUSERSITE=1
-   python -c "import torch; print(torch.cuda.is_available(), torch.cuda.device_count())"
-   ```
-4. Submit one of the provided SLURM jobs:
-   ```bash
-   cd /home/comp/23481501/datasets/SeedMitigating_GPU
-   sbatch slurm/train_all_variants_a100_2gpu.sbatch
-   ```
+2. 按 [ENV_SETUP_GPU.md](ENV_SETUP_GPU.md) 创建独立 Python 环境
+3. 先验证环境是否正常
+4. 再用 [slurm](slurm) 里的模板提交作业
 
-## Step-by-Step Usage
+## 一步一步操作
 
-### 1. Put the Project on the Cluster
+### 1. 把项目上传到集群
 
-Recommended location:
+推荐放在：
 
 ```bash
 /home/comp/23481501/datasets/SeedMitigating_GPU
 ```
 
-Check that the copy is complete:
+上传后先检查目录是否完整：
 
 ```bash
 ls /home/comp/23481501/datasets/SeedMitigating_GPU
 ```
 
-You should see directories like `gpu`, `slurm`, `rl`, `scripts`, `data`, and `verl`.
+你应该能看到：
 
-### 2. Create a Clean Python Environment
+- `gpu`
+- `slurm`
+- `rl`
+- `scripts`
+- `data`
+- `verl`
 
-Read [ENV_SETUP_GPU.md](ENV_SETUP_GPU.md) first. The important point is: do not rely on your current mixed `base + ~/.local` Python setup.
+### 2. 创建干净的 Python 环境
 
-Recommended pattern:
+先看 [ENV_SETUP_GPU.md](ENV_SETUP_GPU.md)。核心原则是：
+
+- 不要继续依赖现在混合的 `base + ~/.local` 环境
+- 给这个项目单独建一个环境
+- 运行时设置 `PYTHONNOUSERSITE=1`
+
+推荐方式：
 
 ```bash
 module load cuda/11.4
@@ -72,7 +74,7 @@ source /home/comp/23481501/venvs/seedmitigating-gpu/bin/activate
 export PYTHONNOUSERSITE=1
 ```
 
-Then install the dependencies:
+然后安装依赖：
 
 ```bash
 python -m pip install --upgrade pip setuptools wheel
@@ -82,9 +84,9 @@ pip install -r requirements-gpu.txt
 pip install -e ./verl
 ```
 
-### 3. Verify the Environment Before Running Jobs
+### 3. 提交作业前先验证环境
 
-Run these checks from the clean environment:
+建议先跑这几条：
 
 ```bash
 source /home/comp/23481501/venvs/seedmitigating-gpu/bin/activate
@@ -95,60 +97,60 @@ python -c "import transformers, ray; print(transformers.__version__); print(ray.
 python -c "import vllm; print(vllm.__version__)"
 ```
 
-If `import torch` fails here, fix the environment first before submitting any training job.
+如果这里 `import torch` 都过不了，就不要先提交训练任务，先把环境修好。
 
-### 4. Choose What You Want to Run
+### 4. 选择要运行的内容
 
-Recommended entrypoints:
+推荐的直接入口：
 
-- Full training: `bash gpu/run_full_training.sh`
-- Full evaluation: `bash gpu/run_evaluation.sh`
-- Test-time scaling: `bash gpu/run_test_time_scaling.sh`
+- 全量训练：`bash gpu/run_full_training.sh`
+- 全量评估：`bash gpu/run_evaluation.sh`
+- Test-Time Scaling：`bash gpu/run_test_time_scaling.sh`
 
-Recommended SLURM templates:
+推荐直接使用的 `sbatch` 模板：
 
 - [train_all_variants_a100_2gpu.sbatch](slurm/train_all_variants_a100_2gpu.sbatch)
 - [evaluate_all_a100_1gpu.sbatch](slurm/evaluate_all_a100_1gpu.sbatch)
 - [test_time_scaling_a100_1gpu.sbatch](slurm/test_time_scaling_a100_1gpu.sbatch)
 
-### 5. Submit Through SLURM
+### 5. 通过 SLURM 提交
 
-Example:
+例如提交训练：
 
 ```bash
 cd /home/comp/23481501/datasets/SeedMitigating_GPU
 sbatch slurm/train_all_variants_a100_2gpu.sbatch
 ```
 
-Check job status:
+查看任务状态：
 
 ```bash
 squeue -u $USER
 ```
 
-### 6. Where Results Go
+### 6. 结果输出在哪里
 
-By default, outputs are written under:
+默认输出目录是：
 
 ```bash
 /home/comp/23481501/datasets/SeedMitigating_GPU/output_gpu/paper_reproduction
 ```
 
-That includes:
+主要包括：
 
 - `checkpoints/`
 - `evaluation/`
 - `test_time_scaling/`
 
-## Common Workflows
+## 常见工作流
 
-### Full Training
+### 全量训练
 
 ```bash
 sbatch slurm/train_all_variants_a100_2gpu.sbatch
 ```
 
-### Full Evaluation
+### 全量评估
 
 ```bash
 sbatch slurm/evaluate_all_a100_1gpu.sbatch
@@ -160,25 +162,32 @@ sbatch slurm/evaluate_all_a100_1gpu.sbatch
 sbatch slurm/test_time_scaling_a100_1gpu.sbatch
 ```
 
-## Notes About This GPU Port
+## 这个 GPU 版的注意事项
 
-- The legacy `rl/scripts/*.sh` and older top-level NPU scripts are still present for reference.
-- The actual recommended path is to use the new [gpu](gpu) wrappers, not the old NPU shell scripts.
-- The GPU launchers assume a dedicated virtualenv and set `PYTHONNOUSERSITE=1`.
-- The main Python evaluation entrypoints were made device-flexible, so they are no longer hard-wired to NPU.
+- 原来的 `rl/scripts/*.sh` 和顶层 NPU 脚本仍然保留，主要用于参考
+- 实际建议使用新的 [gpu](gpu) 封装脚本，而不是旧的 NPU 脚本
+- 新的 GPU 入口默认假设你使用独立虚拟环境，并设置了 `PYTHONNOUSERSITE=1`
+- 主评估 Python 脚本已经不再写死为 NPU
 
-## GitHub Upload Notes
+## 上传到 GitHub
 
-If you want to upload this project to GitHub later, the simplest workflow is:
+如果你想把这个项目上传到 GitHub，最简单的流程是：
 
 ```bash
 cd /path/to/SeedMitigating_GPU
 git init
 git add .
-git commit -m "Initial GPU/SLURM port"
+git commit -m "Initial GPU/SLURM port of SeedMitigating"
 git branch -M main
 git remote add origin git@github.com:YI-Finley/SeedMitigating_GPU.git
 git push -u origin main
 ```
 
-If you create the repository on GitHub first, update the remote URL above if you choose a different repo name.
+如果你已经在 GitHub 上创建好了仓库，但远程有初始 README，那么建议先：
+
+```bash
+git pull --rebase origin main
+git push -u origin main
+```
+
+如果 rebase 时有冲突，再手动处理。
