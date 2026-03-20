@@ -1,0 +1,85 @@
+# NPU环境依赖（基于Huawei Ascend NPU）
+# 仅适配《Mitigating LLM Hallucination via Behaviorally Calibrated Reinforcement Learning》baseline + 4个校准目标
+
+# 核心深度学习框架（NPU版本）
+# 注意：torch和torch-npu版本必须匹配
+# torch==2.7.1
+# torch-npu==2.7.1
+# 这两个包需要单独安装，不在requirements.txt中
+
+# Transformers（模型加载和推理）
+transformers>=4.35.0
+
+# Datasets（数据集加载）
+datasets>=2.14.0
+
+# TRL（强化学习训练）
+trl>=0.7.4
+
+# Accelerate（分布式训练）
+accelerate>=0.24.0
+
+# PEFT（参数高效微调）
+peft>=0.15.2
+
+# 评估依赖
+numpy<2.0.0  # NPU环境需要numpy<2.0
+matplotlib>=3.7.0
+scikit-learn>=1.3.0
+
+# 工具依赖
+wandb>=0.15.0  # 训练监控
+tqdm>=4.65.0   # 进度条
+sentencepiece>=0.1.99  # Qwen模型的分词器
+
+# 日志和配置
+pyyaml>=6.0
+tensorboard>=2.14.0
+
+# NPU特定依赖
+triton-ascend==3.2.0rc4  # Ascend NPU的Triton编译器
+codetiming  # 性能监控
+dill  # 序列化
+hydra-core  # 配置管理
+pandas  # 数据处理
+pyarrow>=15.0.0  # 数据格式
+pybind11  # C++绑定
+tensordict>=0.8.0,<=0.10.0,!=0.9.0  # 张量字典
+einops  # 张量操作
+
+# ============================================================
+# NPU环境安装说明
+# ============================================================
+
+# 1. 安装torch和torch-npu（需要单独安装）
+#    pip install torch==2.7.1 torch-npu==2.7.1
+
+# 2. 安装CANN工具包（需要从华为官网下载）
+#    - CANN版本：8.3.RC1或更高
+#    - 下载地址：https://www.hiascend.com/software/cann
+
+# 3. 安装NNAL ATB库（用于vLLM加速）
+#    wget "https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%208.3.RC2/Ascend-cann-nnal_8.3.RC2_linux-aarch64.run"
+#    chmod +x Ascend-cann-nnal_8.3.RC2_linux-aarch64.run
+#    ./Ascend-cann-nnal_8.3.RC2_linux-aarch64.run --install --quiet
+
+# 4. 环境变量设置（在训练脚本中）
+#    source /usr/local/Ascend/ascend-toolkit/set_env.sh
+#    source /usr/local/Ascend/nnal/atb/set_env.sh
+#    export VLLM_ASCEND_ENABLE_NZ=0
+#    export VLLM_ATTENTION_BACKEND=XFORMERS
+
+# ============================================================
+# 与CUDA版本的主要区别
+# ============================================================
+
+# ❌ 删除的CUDA依赖：
+#    - torch (CUDA版本)
+#    - torchvision (CUDA版本)
+#    - vllm (CUDA版本)
+
+# ✅ 新增的NPU依赖：
+#    - torch-npu (NPU支持)
+#    - triton-ascend (NPU kernel优化)
+#    - CANN工具包 (NPU运行时)
+#    - NNAL ATB库 (NPU加速库)

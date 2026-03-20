@@ -1,0 +1,743 @@
+Mitigating LLM Hallucination via Behaviorally Calibrated
+Reinforcement Learning
+Jiayun Wu1,2,†,Jiashuo Liu1,†,Zhiyuan Zeng1,3,Tianyang Zhan1,
+Tianle Cai1,Wenhao Huang1
+1ByteDance Seed,2Carnegie Mellon University,3Fudan University
+†Corresponding Authors
+Abstract
+The deployment of Large Language Models (LLMs) in critical domains is currently impeded by
+the persistent phenomenon of hallucination—the generation of plausible but factually incorrect
+assertions. While scaling laws have driven significant improvements in general capabilities, recent
+theoretical frameworks suggest that hallucination is not merely a stochastic error but a predictable
+statistical consequence of training objectives that prioritize mimicking the data distribution
+over epistemic honesty. Standard RLVR paradigms, which predominantly utilize binary reward
+signals, inadvertently incentivize models to function as “good test-takers” rather than “honest
+communicators”, encouraging guessing whenever the probability of correctness exceeds zero. In this
+paper, we present an exhaustive investigation intobehavioral calibration, which incentivizes the
+model to stochastically admit uncertainty by abstaining when it is not confident, thereby aligning
+the model’s behavior with its accuracy. We synthesize methodologies from recent advances to
+propose and evaluate training interventions that optimize strictly proper scoring rules for the
+model to output a calibrated probability of correctness. Our methods enable the model to either
+abstain from producing a complete response or to flag individual claims for which uncertainty
+remains. Utilizing the Qwen3-4B-Instruct model, our empirical analysis reveals that behavior-
+calibrated reinforcement learning allows smaller models to surpass frontier models in uncertainty
+quantification, which we demonstrates as a transferable meta-skill that can be decoupled from
+raw predictive accuracy. Trained on mathematical reasoning tasks, our model’s log-scale gain in
+Accuracy-to-HallucinationRatio(0.806)exceedsthatofGPT-5(0.207)withachallengingin-domain
+evaluation (on BeyondAIME [ 7]). Moreover, in cross-domain factual QA (on SimpleQA [ 31]), our
+4B LLM achieves a zero-shot calibration error on par with frontier models including Grok-4 and
+Gemini-2.5-Pro, even though its factual accuracy is much lower.
+Date:December 29, 2025
+Correspondence:Jiayun Wu@jiayunw@cmu.edu, Jiashuo Liu@liujiashuo.77@bytedance.com
+1 Introduction
+The rapid advancement of Large Language Models (LLMs) has been characterized by a relentless pursuit of
+accuracy on static benchmarks. However, as these systems are integrated into complex agentic pipelines [ 4,12,
+13,35] and user-facing applications [ 3], the safety bottleneck has shifted from “can the model answer correctly”
+to “does the model know when it is uncertain or even wrong”. The phenomenon of hallucination—where
+1arXiv:2512.19920v2  [cs.LG]  25 Dec 2025
+
+models confabulate facts with high confidence—remains a stubborn artifact of the current post-training
+paradigm [ 16]. Despite the emergence of long CoT reasoning models, hallucinations persist, particularly in
+domains requiring precise parametric knowledge [31] or multi-step logical deduction.
+The prevailing hypothesis [ 16] attributes hallucination to a fundamental misalignment in the reward models
+used during Reinforcement Learning (RL). In standard Reinforcement Learning with Verifiable Rewards
+(RLVR), the reward function is typically binary: a response is graded as correct (+1) or incorrect ( −1). Under
+this regime, a utility-maximizing agent is incentivized to generate a definitive answer as long as its internal
+probability estimate of correctness, p, is greater than zero. This creates a penalty for abstention, forcing the
+model to suppress uncertainty and masquerade guesses as facts. Consequently, models are trained to be “good
+test-takers”, who guess to maximize expected score, rather than “honest communicators” who abstain when
+confidence is low.
+This work explores the theoretical and practical implementation of Behavioral Calibration, a framework
+recently formalized by Kalai et al. [16]. Behavioral calibration posits that a trustworthy model should
+dynamically adjust its refusal behavior based on a user-specified risk threshold t. Ideally, the model should
+output a substantive answer if and only if its confidence p≥t, and otherwise output a refusal token (e.g., “I
+don’t know” or <IDK>). We implement this idea via reinforcement learning with custom reward functions to
+elicit behavior calibration. Specifically, we design and systematically compare three strategies:
+1.Explicit Risk Thresholding. At training time, we randomly vary the risk tolerance t, inform the model
+oftin the prompt, and reward the model as follows: a correct answer yields a positive reward (+1),
+an answer of <IDK>incurs a neutral reward (0), and an incorrect answer yields a negative reward
+(−t/(1−t)) adaptive to the allowed risk. This scheme makes honest abstention valuable and incentivizes
+the model to calibrate its internal confidence. An ideal Bayesian model under this reward would answer
+if and only if its probability of correctness exceeds the risk tolerance thresholdt.
+2.Verbalized Confidence. Instead of conditioning the model on an external threshold, we train the
+model to explicitly output a scalar confidence score palongside its response. For every risk threshold
+t, we compute the risk-adjusted reward in Explicit Risk Thresholding by abstaining when p≥t.
+Assuming a prior distribution of the risk threshold t, we average the risk-adjusted reward over all
+possible thresholds. The derived average reward is a strictly proper scoring rule that incentivizes the
+model to report a confidencepthat matches its true probability of correctness.
+3.Critic Value. We investigate the efficacy of using the PPO Critic’s value function as an implicit confidence
+estimator. Since the Critic network minimizes the Brier score between the predicted value and the
+return of policy, it naturally converges to the probability of success. This strategy is a byproduct of
+Actor-Critic reinforcement learning without requiring the overhead of tokenized confidence generation.
+According to user-defined risk preferences, we train policy models to either decline to provide a full response or
+to explicitly identify individual claims within a response that are assessed as uncertain. Through experiments
+on both domain-specific reasoning tasks and open-domain QA, we demonstrate that our approach substan-
+tially improves the model’s calibration and reduces hallucination without sacrificing accuracy. We evaluate
+hallucination mitigation using the Signal-to-Noise Ratio (SNR), defined as the ratio of accurate responses
+to hallucinated responses among instances in which the model provides an answer. Our empirical results
+are particularly striking given the small scale of our model. On the challenging in-domain BeyondAIME
+mathematical reasoning benchmark, our 4B-parameter model achieves a log-scale SNR gain of0.806when
+it adaptively refuses an entire response, substantially outperforming GPT-5 (0.207). When restricted to
+highlighting uncertainty at the level of individual claims, the same model attains a log-scale SNR gain of0.183,
+superior to0.019for Gemini-2.5-Pro. This indicates that smaller models can be trained to be strictly more
+self-aware of their limitations than their larger counterparts. In the zero-shot cross-domain setting SimpleQA,
+our model maintains calibration error rates comparable to frontier models like Grok-4 and Gemini-2.5-Pro,
+despite the natural deficit in absolute factual accuracy inherent to smaller parameter counts. Additionally, our
+analysis of the training dynamics reveals that the Critic Value emerges as a strong baseline for uncertainty
+estimation. Finally, the confidence estimates of our methods effectively function as a reward proxy for test-time
+scaling that improves over majority voting.
+2
+
+2 Related Work
+Theoretical Investigations of Hallucination.The persistent prevalence of hallucinations in LLMs has prompted
+rigorous theoretical investigation into its causes. Recent literature suggests that hallucinations are not
+merely stochastic errors but are often a predictable artifact of the standard pre-training and post-training
+objectives [ 15,16]. Specifically, accuracy-based benchmarks and standard Reinforcement Learning with
+binary correctness rewards implicitly incentivize guessing behavior. As long as the probability of correctness
+is non-zero, a utility-maximizing model will attempt an answer rather than abstain, thereby magnifying
+hallucination rates. These findings imply that hallucinations arise as a statistical effect of the misaligned
+evaluation metrics that fail to penalize confident errors. Consequently, there is a growing consensus for new
+training objectives that assign partial credit for uncertainty and explicitly penalize overconfident incorrect
+responses.
+Hallucination Detection.Priortomitigation, asignificantbodyofworkhasfocusedondetectinghallucinations
+using post-hoc analysis of model behaviors. One branch of research exploits the statistics of the model’s
+output to identify uncertainty. For instance, measuring semantic entropy across sampled generations has
+proven effective in distinguishing confabulations from factual claims [ 10], while other works have explored the
+emergence of semantic calibration where models become calibrated on concepts despite being trained by next
+token prediction [ 21]. Parallel to output analysis, researchers have investigated internal model signals, such as
+activation patterns and embeddings, to detect hallucinations. Zhou et al. [37]leverages these internal states
+for detection and subsequent mitigation, while lightweight calibration methods have been proposed to assess
+trustworthiness over LLM generated responses using internal probes [14, 20].
+Abstention and Self-Verification.Beyond passive detection, recent approaches aim to actively train models
+to recognize their own limitations and abstain from answering. Kapoor et al. [17]introduces a calibration
+fine-tuning strategy to explicitly assess their own responses when prompted by an uncertainty query, and
+output refusal tokens when uncertainty is high. Similarly, self-verification pipelines train models to critique
+their own outputs, using reinforcement learning to refine reasoning or trigger retries when errors are suspected
+[5,19]. Advanced paradigms reinforce the generator and verifier jointly, creating a coupled system where the
+model learns to reason and verify simultaneously [36].
+Verbalized Confidence.Our work is most closely related to the emerging field of verbalized confidence,
+where models are trained to express their uncertainty as scalar scores in natural language. Early work
+demonstrated that LLMs possess a latent ability to evaluate their confidence when prompted [ 25], though
+with a tendency for over-confident estimates. Lin et al. [18]calibrates such confidence estimates by supervised
+finetuning. More recently, reinforcement learning has been applied to optimize confidence expressions directly.
+Damani et al. [9], Stangel et al. [27]replace binary success rewards with proper scoring rules to calibrate the
+model’s confidence. These methods demonstrate that incentivizing honest uncertainty expression can improve
+calibration without sacrificing reasoning performance.
+Test-Time Scaling with Confidence.As a downstream application, accurate confidence estimation enables
+test-time scaling strategies. Reliable confidence scores allow for more effective aggregation, where confidence-
+weighted voting outperforms simple majority voting [ 28]. Fu et al. [11]utilizes model-internal confidence
+to dynamically allocate compute resources during inference, prioritizing traces with higher confidence and
+filtering out low-quality reasoning paths.
+Comparison with Related Work.We build on the foundational insights of using proper scoring rules in
+RL [9,27], and introduce a behavioral abstention mechanism into the calibration process, which treats risk
+tolerance as a dynamic input. In contrast to prior work that often decouples confidence estimation from
+the decision of whether to answer, our approach trains the model to be sensitive to the user’s specific error
+tolerance. The model effectively learns the entire calibration curve simultaneously, inherently leading to
+adaptive abstention policy. Furthermore, our formulation unifies the reward design into the choice of the risk
+preference distribution, eliminating the need to manually tune sensitive hyperparameters balancing calibration
+3
+
+rewards against accuracy rewards [ 27]. Finally, we extend the framework of behavioral calibration [ 16] from
+the response level to the claim level, allowing models to precisely flag individual uncertain steps and offer
+fine-grained epistemic transparency that response-level strategies lack.
+3 Methodology
+In this section, we formalize methodologies forbehavioral calibration. Our primary objective is to train a
+large language model that acts as both a competent test-taker and an honest communicator. We propose
+a framework where the model learns a single policy capable of adapting to a user-specified risk tolerance
+t∈[0,1]. The framework allows for adaptive rejection of both theentire response(Section 3.2) andindividual
+claimswithin the response (Section 3.3).
+3.1 Objectives of Behavioral Calibration
+For each prompt xand a risk threshold t, the model generates a response y, and decides on an action
+a(t)∈ {ANS,ABS} to ANSWER with response yor ABSTAIN using a special token ⟨IDK⟩. We specify four
+objectives of behavioral calibration.
+1.Adaptive Risk:We aim to train asinglepolicy model that satisfies calibration constraints across the
+entire spectrum of risk tolerance t∈[0,1]. The model must be user-adjustable; given a threshold t, the
+model should automatically adjust its abstention strategy without retraining.
+2.Accuracy Preservation:The calibration mechanisms must not degrade the model’s inherent ability.
+Specifically, at t= 0(maximum risk tolerance), the accuracy of the calibrated model should match or
+exceed that of the baseline model finetuned by standard RL.
+3.Hallucination Reduction:As the risk threshold tincreases, the hallucination rate should monotonically
+decrease, ideally approaching zero as t→1. We quantify hallucination mitigation by Signal-to-Noise
+Ratio(SNR(t)), defined as the ratio of accuracy to hallucination rate under a specified risk preference t.
+Letvalid(y)be an indicator for the correctness of the response. The Accuracy Acc(t), Hallucination
+Hal(t), and SNR(t)for a given risk thresholdtare formally defined as:
+Acc(t) =E[valid(y)∧a(t) =ANS],Hal(t) =E[¬valid(y)∧a(t) =ANS],SNR(t) =Acc(t)
+Hal(t).
+Astincreases, a significant increase in SNR(t)indicates effective hallucination mitigation and the
+model’s capability to distinguish between correct and incorrect responses. We extend the definition of
+SNR to an interval of risk thresholds t∈Iby averaging the accuracy and hallucination across the risk
+spectrum.
+SNR(I) =R
+t∈IAcc(t)dtR
+t∈IHal(t)dt.
+Our final evaluation focuses on the gain of the SNRover the entire spectrum t∈[0,1]relative to the
+risk-free baseline att= 0.
+SNR-Gain= logSNR([0,1])
+SNR(0)
+.(1)
+4.Quantitative Calibration:The model’s accuracy and abstention rates should satisfy two quantitative
+metrics for calibration.
+TheTrue Positiveconstraint requires that among the questions the model chooses to answer, the
+proportion of correct answers must be at least the stated confidence thresholdt:
+TP(t) =E[valid(y)|a(t) =ANS]≥t.
+TheFalse Negativeconstraint ensures the model is not overly conservative. Among the questions the
+model chooses to abstain from, the proportion of questions itcouldhave answered correctly (at t= 0)
+must be lower thant:
+FN(t) =E[valid(y)|a(t) =ABS]≤t
+4
+
+Figure 1Accuracy, hallucination, and abstention rates across the training progress (Step 10, 20, 30, 40, 50, and
+60) of Explicit Risk Thresholding . Base model: Qwen3-4B-Instruct. Trained by GRPO on the DAPO-Math-17k
+dataset [33]. Evaluated on AIME 2024. Baseline is trained with the standard binary reward.
+3.2 Three Strategies for Behavioral Calibration
+We design and systematically compare three strategies for behaviorally calibrated RL.
+3.2.1 Explicit Risk Thresholding
+A straightforward approach to induce calibrated behavior is to explicitly condition the model on the risk
+thresholdt. We explicitly instruct the model on the scoring rules with the prompt from Kalai et al. [16]:
+“Answer only if you are > tconfident, since mistakes are penalized t/(1−t)points, while correct
+answers receive 1 point, and an answer of <IDK> receives 0 points.”
+During the post-training phase, for every training instance, we sample a risk threshold tfrom a uniform
+distributiont∼ U(0,1). The reward functionRis formulated as:
+R(a, y, t) =
+
++1ifa=ANS∧valid(y)
+0ifa=ABS
+−t
+1−tifa=ANS∧ ¬valid(y)(2)
+However, our preliminary experiments indicate several limitations of the approach (Figure 1). The objectives
+of behavioral calibration in Section 3.1 are not satisfied. The model fails to achieve Adaptive Risk . The
+refusal rate and hallucination rate proved insensitive to the specific prompt input tduring inference. Second, it
+violates Accuracy Preservation . The policy tends to over-reject even at t= 0, often leading to performance
+below the baseline. Third,Hallucination Reductionis not achieved. Although the absolute hallucination
+rate reduces as training progresses, the Signal-to-Noise Ratio (SNR) does not positively correlate with the
+risk threshold t, resulting in a near-zero SNR-Gain. Note that, in Figure 1, SNR is visually represented by
+the ratio of the green area (Accuracy) to the red area (Hallucination). Quantitative Calibration also fails
+fort= 1(TP(1)<1) where the model is over-confident. In summary, explicitly sampling tcreates a noisy
+optimization landscape where the model struggles to learn a coherent strategy for adaptive conditions from
+t= 0tot= 1.
+3.2.2 Verbalized Confidence
+To overcome the instability of explicitly sampling risk thresholds, we prompt the model to explicitly output a
+scalar confidence score palong with its answer. Rather than conditioning on an input t, we make a post-hoc
+5
+
+decision to answer or abstain: abstain if and only ifp < t.
+a(t, p) =ABS ifp < telse ANS.
+The key innovation is deriving the reward function by integrating the behavioral calibration reward over some
+prior distribution of risk thresholds. This transforms the training objective from conditional optimization
+(with sampled thresholds) into optimization for a proper scoring rule of verbalized confidence.
+Formally, assume a distribution of risk tolerance supported on(0 ,1)which cumulative distribution function is
+denoted asu(t). For eacht∈[0,1], we scale the reward in Equation (2) to be bounded:
+R(a, y, t) =
+
++1ifa=ANS∧valid(y)
+2t−1ifa=ABS
+−1ifa=ANS∧ ¬valid(y)
+Then we average the risk-adjusted reward across all risk thresholds.
+Ru(y, p) =Z1
+t=0R(a(t, p), y, t)du(t) = 2·valid(y)·Zp
+0du(t) + 2Z1
+ptdu(t)−1.
+One can verify that Ruis a strictly proper scoring rule if the prior risk distribution u(t)has positive density
+anywhere. A strictly proper scoring rule implies that the expected reward is maximized exactly when
+p=E[valid(y)].
+Uniform Distribution.Assuming a uniform distribution of risk preference t∼ U (0,1), the resulting average
+reward function is analogous to the Brier score.
+RBrier = 2p·valid(y)−p2.(3)
+This reward function can be decomposed into the sum of a correctness reward and the Brier score of the
+confidence: RBrier =valid(y)−(p−valid (y))2. Intuitively, the reward incentivizes the model to maximize
+prediction accuracy while simultaneously calibrating its stated confidence.
+Beta Distribution.We consider a risk threshold distribution which emphasizes performance at the extreme
+ends of the risk spectrum—specifically the “test-taker” mode ( t≈0) and the “fully honest” mode ( t≈1). We
+utilize a truncated Beta(0,0)distribution with density du(t)∝1
+t(1−t)forϵ < t < 1−ϵ. Integrating the reward
+over this distribution yields a cross-entropy style reward function:
+RCE=
+log1−ϵ
+ϵ−1
+valid(y)·logp′
+ϵ+ (1−valid(y))·log1−p′
+1−ϵ
+,(4)
+where p′=clip(p, ϵ,1−ϵ). This formulation imposes stronger penalties for overconfidence on wrong answers
+and underconfidence on correct answers.
+3.2.3 Critic Value
+As an alternative to generating confidence tokens, we explore a discriminative approach using the critic
+network of the PPO (Proximal Policy Optimization) algorithm. The critic network estimates the value
+function by minimizing the Brier score with the correctness reward, resembling Verbalized Confidence with
+a uniform prior of risk thresholds. Theoretically, the Critic is naturally trained to be a calibrated predictor
+of the expected accuracy. Therefore, we use the output of the PPO Critic at the final token directly as the
+confidence score. This method proves as a strong baseline.
+6
+
+3.3 Behavioral Calibration for Individual Claims
+Further, we extend the framework of behavioral calibration to individual claims comprising the complete
+response. However, several subtle caveats impede a direct extension:
+•Directly replacing an individual claim with a special token <IDK>often produces an incohesive response.
+For instance, steps in a mathematical solution are typically interdependent. Therefore, we propose to
+output the complete response while signifying abstention behavior by visually highlighting the uncertain
+claim in the user interface.
+•Defining both correctness and confidence is ambiguous for intermediate steps within a response. For
+example, a reflective step in COT might correctly identify an error in a preceding incorrect claim. While
+this reflection might confidently identify the fault, it may indicate a lower confidence for a successful
+solution. To circumvent this inherent ambiguity, we disregard the intermediate COT steps and focus on
+the abstention behavior of the final solution.
+•Explicit correctness annotations for the individual claims are absent. Therefore, we design a learning
+objective derived solely from the final outcome. Nevertheless, we demonstrate that our approach yields
+calibrated confidence estimates for these intermediate steps through weak supervision from the final
+outcome.
+For the formal setup, we systematically prompt the model to reason privately before generating a final
+response that is structured into discrete steps. Specifically, for a given user prompt x, the model generates
+a final response y= (y1, y2, . . . , y N)composed of Nindividual claims, where Nis determined dynamically
+by the model. For each claim yiand a user-specified risk threshold t, the model must select an action
+ai(t)∈ {ANS,ABS} , determining whether to assert the claim (ANS) or to highlight it as uncertain (ABS).
+The ground-truth correctness of each claim yiis denoted by valid (yi), which is determined by an LLM Judge
+in our experimental evaluation.
+3.3.1 Verbalized Confidence
+We instruct the model to explicitly output a confidence score pifor each individual claim yi. The model
+executes the abstention action ( ABS) if and only if pi< t. Furthermore, the model is prompted to provide a
+concise explanation justifying the reported confidence and identifying the source of uncertainty. We instruct
+the model to encapsulate each claim in HTML format, as illustrated in Figure 2.
+Since only the final outcome is annotated, we must aggregate the claim-level confidence scores into an overall
+response confidence. This aggregated confidence is subsequently used to post-train the model by our previous
+reward function derived from the proper scoring rule.
+1.Product Aggregation. The most straightforward aggregation takes the product of the claim-level
+confidence scores ( p=Q
+ipi). This method is predicated on two assumptions: (i) the correctness events
+of individual claims are independent, and (ii) the final outcome is correct if and only if all claims are
+correct. Empirically, we find that the independence assumption is frequently violated, as confidence
+estimates across different steps of the same response tend to be highly correlated (e.g., incorrect responses
+often contain multiple errors). Consequently, while the response-level confidence may achieve calibration,
+the claim-level confidence is often over-confident. For instance, if a 10-step, incorrect response has a
+uniform claim-level confidence of80%(over-confident), the product aggregation yields a response-level
+confidence of11%, which is closer to a calibrated value.
+2.Minimum Aggregation. We also investigate aggregation by taking the minimum of all claim-level
+confidence scores ( p=minipi). For the previous example, this method requires that the confidence
+of the most uncertain claim be11%to yield the same response-level confidence. Therefore, minimum
+aggregation incentivizes the model to allocate low confidence to the most fault-prone step.
+Utilizing the aggregated confidence from either the product or minimum strategy, the model is subsequently
+post-trained using the Brier score reward function as defined in Equation (3).
+7
+
+Figure 2Sample output of Verbalized Confidence for individual claims from Qwen3-4B-Instruct-confidence-min .
+3.3.2 Critic Value
+Since the critic network of PPO intrinsically computes a token-level value, it is plausible to interpret this value
+function as the token-level confidence for the intermediate steps of the model’s output. However, because the
+critic network minimizes the Brier score relative to thefinal outcomereward, the resulting value function
+reflects the model’s confidence in the correctness of the final outcome conditional on the steps thus far,
+rather than confidence in the correctness of the current step itself. Our preliminary experiments confirm that
+this misaligned optimization objective impedes the extension of Critic Value as a confidence measure for
+individual claims.
+We observe that Critic Value in intermediate steps essentially functions as a semantic classifier rather
+than an uncertainty verifier. For instance, in mathematical problems, the value function decreases when a
+contradiction is detected, when a suboptimal approach (e.g., enumeration, guessing) is employed, or when
+limited progress is achieved as the token budget is consumed. Crucially, the value function fails to decrease
+precisely where the underlying error occurs that subsequently leads to the contradiction. Conversely, the value
+function increases when a conclusion is verified or a promising approach is adopted. However, this increase
+does not register at the prior steps that led to the verified conclusion. Two samples are presented in Figure 3.
+This disparity arises because the value function is designed to estimate the probability of success for the final
+solution rather than the probability of correctness for the current step.
+4 Experiments
+8
+
+(a)Confidence decreases at contradiction.
+ (b)Confidence increases at verification.
+Figure 3Sample output of Critic Value as token-level confidence. The continuous confidence is visualized with a
+color gradient scale, ranging from red (0% confident) to green (100% confident). Evaluated on AIME-2024.
+4.1 Training Setup
+We apply behavioral calibration to finetune Qwen-3-4B-Instruct-2507 [30]. We use the PPO algorithm by
+default for reinforcement learning. We use GRPO [ 26] to train Verbalized Confidence with Beta distribution
+as the prior risk preference, because we discover improved training stability specifically for this reward design.
+We train our methods on the DAPO-Math-17k dataset from Yu et al. [33].
+We compare Verbalized Confidence and Critic Value in response-level evaluations, while Verbalized
+Confidence is exclusively adopted in the claim-level evaluations. We present the following variants of our
+strategies:
+•Qwen3-4B-Instruct-PPO : The baseline model finetuned with the standard binary correctness reward
+by the PPO algorithm.
+•Qwen3-4B-Instruct-Confidence-Brier :Verbalized Confidence with uniform distribution as the
+prior of risk threshold. Trained for the response-level confidence.
+•Qwen3-4B-Instruct-Confidence-CE :Verbalized Confidence with Beta distribution as the prior of
+risk threshold. Trained for the response-level confidence.
+•Qwen3-4B-Instruct-PPO-Value:Critic Valuebuilt upon the PPO algorithm.
+•Qwen3-4B-Instruct-Confidence-Prod :Verbalized Confidence with uniform distribution as the
+prior of risk threshold. Trained for the aggregated confidence by taking the product of individual
+claim-level confidence scores.
+•Qwen3-4B-Instruct-Confidence-Min :Verbalized Confidence with uniform distribution as the prior
+of risk threshold. Trained for the aggregated confidence by taking the minimum of individual claim-level
+confidence scores.
+Additionally, we include for reference several frontier models by directly prompting them to output Verbalized
+Confidence for both the complete response and individual claims. The evaluation includes a series of models
+from GPT [ 22–24], Claude-Sonnet [ 2], Grok [ 32], Gemini [ 8], GLM [ 1,34], Qwen3 [ 30], and Kimi [ 29]. The
+comparison positions our 4B model relative to much larger models in terms of both accuracy and calibration.
+4.2 Quantitative Evaluation of Confidence Calibration
+We evaluate the the model’s confidence estimates, focusing on the behavioral calibration of their resulting
+abstention policy. First, we measure the standard calibration of the confidence estimates with respect to the
+ground-truth correctness outcome.
+•Smoothed ECE (smECE): Standard Expected Calibration Error (ECE) is computed by comparing the
+model’s reported confidences with actual accuracy in bins. However, standard ECE is biased and
+sensitive to bin count. We use smooth ECE [ 6], which utilizes kernel density estimation to smooth the
+observations and provide a theoretically-sound calibration measure.
+9
+
+Table 1Response-level evaluation of confidence calibration on BeyondAIME [7].
+ModelSNR
+Gain↑Conf
+AUC↑Abs
+Acc↑smECE↓ Brier↓ NLL↓Pred
+Acc↑
+Qwen3-next-80b-a3b-thinking 0.006 0.4960.557 0.408 0.4251.826 0.557
+GLM-4.5 0.016 0.5190.536 0.440 0.4491.971 0.532
+Qwen3-max 0.043 0.6780.540 0.453 0.4131.583 0.537
+Gemini-2.5-Pro 0.071 0.6990.553 0.431 0.3871.443 0.544
+Qwen3-4B-Instruct 0.084 0.7150.338 0.632 0.5992.316 0.291
+Kimi-K2-0905 0.087 0.6780.385 0.575 0.5292.004 0.355
+Qwen3-4B-instruct-ppo 0.101 0.7860.388 0.560 0.5181.873 0.361
+GPT-oss-120b 0.154 0.7030.497 0.419 0.4021.415 0.436
+GPT-5 0.207 0.7060.718 0.160 0.2080.7190.680
+o4-mini 0.515 0.7380.698 0.164 0.2410.845 0.527
+Qwen3-4B-Instruct-confidence-min 0.683 0.8630.703 0.220 0.1940.606 0.384
+Qwen3-4B-instruct-confidence-brier 0.802 0.902 0.782 0.177 0.1610.527 0.395
+Qwen3-4B-Instruct-confidence-prod 0.806 0.8830.766 0.166 0.1660.516 0.385
+Qwen3-4B-Instruct-confidence-ce 1.097 0.8540.771 0.174 0.1790.722 0.364
+Qwen3-4B-Instruct-ppo-value 1.202 0.881 0.797 0.061 0.141 0.4360.387
+•Brier Score: The mean squared error between the model’s confidence pand the outcome (1 for correct,
+0 for incorrect).
+•Negative Log-Likelihood (NLL)of correctness outcomes assuming the probability of correctness is given
+by the confidencep.
+Second, we assess effective hallucination mitigation by the model’s discrimination between correct and incorrect
+responses, and accurate rejection of inaccurate responses.
+•Confidence AUC: Area under the ROC curve by treating abstention as a classification task with estimated
+confidence. While ECE measures the alignment of average confidence with average accuracy, Confidence
+AUC is the critic metric for evaluating models’ ability to distinguish “knowns” from “unknowns”. It
+measures the probability that a correct answer is assigned a higher confidence score than an incorrect
+one. Crucially, AUC is independent of the risk threshold and the absolute problem-solving accuracy,
+making it fair for comparing weak and strong models.
+•SNR Gain: Considering confidence estimates as the signal for rejection, we evaluate the policy’s Signal-
+to-Noise Ratio (SNR), defined as the ratio of accuracy to hallucination. As the risk threshold tincreases,
+we expect reduction in hallucination which should cause increase in SNR. Therefore, our metric of
+interest is the gain of SNR acorss the spectrum of risk thresholds t∈[0,1]relative to the baseline at
+t= 0. Equation (1) provides the formal calculation of the SNR Gain.
+•Abstention Accuracy: The proportion of responses that abstain from incorrect answers or answer with
+correct answers. Assume abstention with confidence below 0.5.
+Finally, we measure the model’s raw accuracy in the risk-free setting (t= 0) for reference.
+•Predictive Accuracy: The standard accuracy of problem solving assuming no abstention.
+Math benchmarks have become saturated by frontier models. Therefore, we utilize BeyondAIME [ 7], which is
+composed of 100 ultra-hard mathematical problems with difficulty equal to or exceeding the hardest problems
+in AIME. Sourced from mathematical competitions, the problems are then systematically revised by specialists
+to be resistant to contamination. All answers are non-trivial positive integers, allowing for deterministic
+programmatic verification. This serves as the primary testbed for our model, which is post-trained on math
+data. It measures whether the model can calibrate its confidence on tasks it is explicitly trained to solve.
+10
+
+4.2.1 Response-Level Evaluation
+We first evaluate the confidence estimates for the entire response. The results are in Table 1. Both Verbalized
+Confidence andCritic Value demonstrate significantly higher Confidence AUC and SNR Gain compared
+to the instruct model and other frontier models. The confidence scores reported by our methods possess the
+strongest capability to discriminate between correct and incorrect responses. The aggregated confidence from
+claim-level Verbalized Confidence exhibits performance metrics comparable to those directly producing a
+response-level confidence score. Figure 4 reveals a strong correlation between confidence and accuracy for
+our methods. A similar phenomenon is observed in GPT-5 and o4-mini. Conversely, in other frontier models
+and the untrained Qwen3 instruct model, accuracy shows negligible variation with respect to confidence. We
+demonstrate that post-training can effectively stimulate the model’s ability to accurately report confidence,
+which is a capability currently present exclusively in OpenAI series models.
+(a)Frontier Models
+ (b)Ours (based on Qwen3-4B-Instruct)
+Figure 4The calibration diagram for response-level stated confidence on BeyondAIME. The size of curves indicates
+density.
+Method Comparison.In Table 2, We compare several variants of our methods on AIME-2024 and AIME-2025,
+whose difficulty aligns better with the capacity of Qwen3-4B-Instruct. Verbalized Confidence achieves
+the overall optimal calibration performance, as measured by Confidence AUC and smECE, when reward
+calculation uses a uniform distribution of risk thresholds (Confidence-Brier). On the other hand, a Beta
+distribution for the risk preference yields the optimal SNR Gain (Confidence-CE), implying the most aggressive
+mitigation of hallucination under stringent risk tolerance. Critic Value serves as a strong baseline with
+respect to the smECE metric.
+4.2.2 Claim-Level Evaluation
+The ground-truth correctness of individual claims is established by GPT-5 as Judge. The Judge is provided
+with the user prompt, the model solution, and the final answer’s ground-truth label. The Judge is then
+instructed to parse the claims from the HTML-formatted solution and assess the correctness of each extracted
+claim. We evaluate the behavioral calibration of the model’s claim-level abstention policy. The results are
+presented in Table 3.
+11
+
+Table 2Response-level evaluation of confidence calibration on AIME.
+AIME-2024 AIME-2025
+Model smECE↓Conf AUC↑SNR Gain↑Pred Acc↑smECE↓Conf AUC↑SNR Gain↑Pred Acc↑
+Confidence-Brier0.032 0.9551.1530.7550.0770.9511.097 0.621
+PPO-Value 0.070 0.909 1.051 0.7020.0420.938 1.105 0.627
+Confidence-CE 0.075 0.8941.3200.701 0.084 0.9001.352 0.638
+PPO Only 0.223 0.877 0.205 0.705 0.301 0.886 0.213 0.608
+Qwen3-4B-Instruct 0.330 0.787 0.177 0.590 0.450 0.836 0.153 0.466
+Table 3Claim-level evaluation of confidence calibration on BeyondAIME.
+ModelSNR
+Gain↑Conf
+AUC↑Abs
+Acc↑smECE↓ Brier↓ NLL↓Pred
+Acc↑
+Qwen3-max 0.018 0.7170.889 0.132 0.1060.469 0.889
+Gemini-2.5-Pro 0.019 0.719 0.891 0.130 0.104 0.449 0.891
+Qwen3-4B-Instruct 0.027 0.6170.563 0.456 0.4191.809 0.558
+GLM-4.5 0.029 0.6760.719 0.294 0.2601.027 0.719
+o4-mini 0.068 0.6010.774 0.210 0.2110.887 0.770
+Qwen3-4B-Instruct-confidence-prod 0.183 0.7410.526 0.311 0.3050.930 0.497
+Qwen3-4B-Instruct-confidence-min 0.301 0.788 0.616 0.258 0.2510.810 0.537
+Through weak supervision from the final outcome, the post-trained Qwen3 models demonstrate a significant
+improvement in behavioral calibration for intermediate steps across all measured metrics compared to the
+base instruct model. Furthermore, Minimum aggregation of claim-level confidence proves superior to Product
+aggregation at the claim level, though the latter method achieves better calibration at the response level
+(Table 1). Compared to frontier models, Verbalized Confidence mitigates hallucination more effectively,
+evidenced by advantage in SNR Gain and Confidence AUC. Frontier models exhibit superiority in metrics of
+standard calibration, including smECE, Brier, and NLL. However, Figure 5 reveals that this is attributable to
+higher overall accuracy rather than superior confidence estimation. For frontier models, the accuracy is nearly
+independent of the stated confidence. In contrast, Verbalized Confidence yields informative confidence
+scores which monotonically increase with the empirical accuracy.
+4.3 Critieria of Behavioral Calibration
+We evaluate the behavioral calibration objectives in Section 3.1 on BeyondAIME. The results confirm that
+our models satisfy behavioral calibration for both complete responses and individual claims.
+1.Adaptive Risk:In Figure 6, as the risk threshold tincreases, the hallucination rate decreases rapidly for
+models trained with Verbalized Confidence andCritic Value . Frontier models and Qwen3 trained
+by standard PPO show convex abstention curves: their boundary between hallucination and abstention
+areas are convex. In contrast, our models’ concave abstention curves indicate a faster adaptation to risk,
+and consequently, lower hallucination rates.
+2.Accuracy Preservation:In Figure 6, at t= 0, the policy does not refuse to answer. In Table 1, the
+accuracy of Verbalized Confidence andCritic Value is maintained compared to the baseline PPO
+trained by standard correctness reward.
+3.Hallucination Reduction:In Figure 6, the overall hallucination rate is controlled by adaptive abstention.
+Crucially, at t= 1, the hallucination rate drops to 0. Figure 6 also visualizes Signal-to-Noise Ratio
+(SNR) as the ratio of accuracy (green area) to hallucination (red area). SNR increases drastically for
+our methods, corresponding to the higher SNR Gain in Table 1 and Table 3.
+4.Quantitative Calibration:Analysis of the True Positive (TP) and False Negative (FN) curves in Figure 7
+indicates that Confidence-Brier andCritic Value nearly satisfy behavioral calibration: the TP curve
+lies above y=x, and the FN curve lies below it. In contrast, the curves for frontier models and the
+base Qwen3 instruct model exhibit more erratic behavior. Their TP rates increase relatively slowly with
+12
+
+(a)Frontier Models
+ (b)Ours
+Figure 5The calibration diagram for claim-level stated confidence on BeyondAIME. The size of curves indicates
+density. Note that in (a), the curves of Qwen3-Max and Gemini-2.5-Pro are overlapped.
+Table 4Response-level evaluation of confidence calibration on SimpleQA.
+ModelSNR
+Gain↑Conf
+AUC↑Abs
+Acc↑smECE↓ Brier↓ NLL↓Pred
+Acc↑
+Gemini-2.5-pro 0.017 0.5560.547 0.451 0.4361.900 0.545
+Qwen3-4B-Instruct 0.066 0.5610.142 0.821 0.7622.550 0.062
+Grok-4 0.147 0.6640.551 0.307 0.3270.988 0.492
+Qwen3-4B-Instruct-ppo-value 0.211 0.7340.236 0.665 0.5251.510 0.031
+Claude-sonnet-4.5-nothinking 0.282 0.7480.544 0.318 0.2840.786 0.299
+GLM-4.6 0.358 0.7390.518 0.377 0.3100.878 0.206
+Qwen3-4B-Instruct-confidence-Brier 0.411 0.7040.540 0.459 0.3411.100 0.058
+Claude-sonnet-4.5-thinking 0.456 0.7830.658 0.200 0.2140.614 0.308
+GPT-5 0.498 0.838 0.729 0.098 0.178 0.530 0.438
+the confidence threshold and drop below y=xfor highly conservative risk thresholds. These models
+also over-refuse at relatively low risk thresholds, causing their FN rates to improperly rise above y=x.
+4.4 Direct Transfer to Factual Question Answering
+To test whether the metacognitive ability trained via our method generalizes, we evaluate the model—trained
+onlyon mathematics—directly on SimpleQA [ 31], a challenging long-tail factual knowledge benchmark to
+measure models’ ability to correctly abstain. Results are shown in Table 4.
+Despite the model having extremely low prediction accuracy due to model capacity and zero-shot generalization,
+the confidence calibration of Confidence-Brier significantly improves over the base instruct model and rivals
+frontier models including Gemini-2.5-Pro, Grok-4, and GLM-4.6. Critic Value does not generalize as well
+asConfidence-Brier in the cross-domain QA task. It is noteworthy that our methods are more competitive
+with respect to the SNR Gain and Confidence AUC metric, which is insensitive to the native accuracy of
+models, making this comparison robust. We successfully trained a transferable “meta-skill” (calibration) that
+generalizes to new domains even where the model lacks foundational knowledge (accuracy). This proves that
+calibration is a learnable skill independent of factual knowledge.
+13
+
+(a)PPO Only (response)
+ (b)Gemini-2.5-Pro (response)
+ (c)GPT-5 (response)
+(d)Confidence-Brier (response)
+ (e)Confidence-CE (response)
+ (f)PPO-Value (response)
+(g)Gemini-2.5-Pro (claim)
+ (h)Confidence-Prod (claim)
+ (i)Confidence-Min (claim)
+Figure 6Accuracy, hallucination, and abstention rates obtained by thresholding confidence estimates according to
+varied risk tolerance t. If the model’s output confidence is less than the risk threshold t, the model refuses to answer.
+Evaluated on BeyondAIME for both complete responses and individual claims. Baseline accuracy reports the accuracy
+when always answering.
+4.5 Test-Time Scaling
+We investigated whether calibrated confidence can be utilized for Test-Time Scaling (TTS), specifically by
+selecting answers based onMax ConfidenceorConfidence Weighted Majority. Our analysis in Figure 8
+suggests that the trained confidence acts as a reward proxy better than majority voting, and improves over
+the verbalized confidence from standard PPO.
+However, we discuss a distinction regarding the utility of confidence calibration for TTS. For example, a model
+generates two guesses for question I—one correct and one incorrect—and assigns a confidence of1
+2to both.
+The model also generates three guesses for quesion II—one correct and two incorrect—and assigns a confidence
+of1
+3to all of them. The model is perfectly-calibrated, but Max Confidence provides no discriminatory
+power to select the correct answer over the incorrect one. This reveals a fundamental difference in objectives:
+Behavioral Calibration focuses on inter-prompt discrimination while Test-Time Scaling requires intra-prompt
+discrimination.
+5 Discussion
+Our research empirically supports and extends several hypotheses in Kalai et al. [16].
+The Inevitability of Hallucination.Language models possess the capacity to selectively refuse generation
+when uncertainty is high. By implementing dynamic adaptation of rejection rates based on confidence scores,
+14
+
+(a)Frontrier Models (response-level)
+ (b)Ours (response-level)
+(c)Frontier Models (claim-level)
+ (d)Ours (claim-level)
+Figure 7The behavioral calibration diagram for models on BeyondAIME, where we plot the True Positive (bold) and
+False Negative (dotted) curves. Evaluated for both complete responses and individual claims. Our methods are based
+on Qwen3-4B-Instruct.
+15
+
+(a)PPO Only
+ (b)PPO-Value
+ (c)Confidence-Brier
+Figure 8Test-time scaling using confidence as the reward proxy. We select the max-confidence response within k
+responses ( Maxconf) or perform weighted majority voting using confidence as weights ( Majconf). As baselines, accuracy
+is computed with Mean@k, Best@k, and Majority@k. Evaluated on BeyondAIME [7].
+it is possible to maintain maximum performance in “test-taker mode” while ensuring safety in “honest mode”.
+Crucially, we demonstrate that confidence calibration is a learnable attribute that can be improved through
+training.
+Accuracy versus Hallucination Mitigation.We observe that for several frontier models, accuracy is not
+positively correlated with hallucination rates or confidence calibration. Notably, the advantage exhibited by
+GPT series models lies significantly more in their ability to control hallucinations than in their raw accuracy
+advantage. This indicates that hallucination mitigation is a distinct capability from factual accuracy.
+Model Scale versus Hallucination Mitigation.We demonstrate that small models (e.g., 4B parameters) can
+achieve confidence calibration comparable to frontier models. The computational resources required for
+effective “calibration” are significantly lower than those needed to pursue absolute accuracy. Conversely, the
+verbalized confidence of certain large models fail to accurately reflect their actual performance.
+We note that small models can assess their limitation more easily (e.g., a small model lacking Maori linguistic
+data simply refuses, whereas a partially capable model must assess its confidence [ 16]). Self-verification is most
+challenging when model accuracy approaches 50% (maximum entropy). Both extremely poor and extremely
+capable models find self-verification relatively straightforward. To effectively benchmark hallucinations, we
+evaluate our models where model accuracy (without refusal) is maintained around the 50% threshold. On
+the BeyondAIME benchmark, Qwen3-4B operates at approximately 40% accuracy, whereas GPT-5 operates
+at approximately 70%. Consequently, the calibration task is (paradoxically) slightly more difficult for the
+Qwen3-4B model in this context. The Qwen3-4B model still excels in behavioral calibration.
+To facilitate a fair evaluation across models of varying scales and accuracy we employed the AUC metric,
+demanding that the model’s confidence scores maximally distinguish between positive and negative instances.
+This metric is robust as it remains insensitive to the average accuracy, providing a pure measure of the model’s
+introspective capabilities.
+16
+
+References
+[1]Zhipu AI. Glm-4.6: Advanced agentic, reasoning and coding capabilities. Technical report, Zhipu AI, 2025. URL
+https://z.ai/blog/glm-4.6.
+[2]Anthropic. System card: Claude sonnet 4.5. Technical report, Anthropic, 2025. URL https://www.anthropic.
+com/claude-sonnet-4-5-system-card.
+[3]Rahul K Arora, Jason Wei, Rebecca Soskin Hicks, Preston Bowman, Joaquin Quiñonero-Candela, Foivos
+Tsimpourlas, Michael Sharman, Meghan Shah, Andrea Vallone, Alex Beutel, et al. Healthbench: Evaluating large
+language models towards improved human health.arXiv preprint arXiv:2505.08775, 2025.
+[4]Victor Barres, Honghua Dong, Soham Ray, Xujie Si, and Karthik Narasimhan. τ2-bench: Evaluating conversational
+agents in a dual-control environment.arXiv preprint arXiv:2506.07982, 2025.
+[5]Shelly Bensal, Umar Jamil, Christopher Bryant, Melisa Russak, Kiran Kamble, Dmytro Mozolevskyi, Muayad
+Ali, and Waseem AlShikh. Reflect, retry, reward: Self-improving llms via reinforcement learning.CoRR,
+abs/2505.24726, 2025. doi: 10.48550/ARXIV.2505.24726. URL https://doi.org/10.48550/arXiv.2505.24726 .
+[6]Jaroslaw Blasiok and Preetum Nakkiran. Smooth ECE: principled reliability diagrams via kernel smoothing. In
+The Twelfth International Conference on Learning Representations, ICLR 2024, Vienna, Austria, May 7-11, 2024.
+OpenReview.net, 2024. URLhttps://openreview.net/forum?id=XwiA1nDahv.
+[7]ByteDance-Seed. Beyondaime: Advancing math reasoning evaluation beyond high school olympiads.
+https://huggingface.co/datasets/ByteDance-Seed/BeyondAIME, 2025.
+[8]Gheorghe Comanici, Eric Bieber, Mike Schaekermann, Ice Pasupat, Noveen Sachdeva, Inderjit Dhillon, Marcel
+Blistein, Ori Ram, Dan Zhang, Evan Rosen, et al. Gemini 2.5: Pushing the frontier with advanced reasoning,
+multimodality, long context, and next generation agentic capabilities.arXiv preprint arXiv:2507.06261, 2025.
+[9]Mehul Damani, Isha Puri, Stewart Slocum, Idan Shenfeld, Leshem Choshen, Yoon Kim, and Jacob Andreas.
+Beyond binary rewards: Training lms to reason about their uncertainty.CoRR, abs/2507.16806, 2025. doi:
+10.48550/ARXIV.2507.16806. URLhttps://doi.org/10.48550/arXiv.2507.16806.
+[10]Sebastian Farquhar, Jannik Kossen, Lorenz Kuhn, and Yarin Gal. Detecting hallucinations in large language
+models using semantic entropy.Nat., 630(8017):625–630, 2024. doi: 10.1038/S41586-024-07421-0. URL https:
+//doi.org/10.1038/s41586-024-07421-0.
+[11]Yichao Fu, Xuewei Wang, Yuandong Tian, and Jiawei Zhao. Deep think with confidence.CoRR, abs/2508.15260,
+2025. doi: 10.48550/ARXIV.2508.15260. URLhttps://doi.org/10.48550/arXiv.2508.15260.
+[12]Liang Hu, Jianpeng Jiao, Jiashuo Liu, Yanle Ren, Zhoufutu Wen, Kaiyuan Zhang, Xuanliang Zhang, Xiang Gao,
+Tianci He, Fei Hu, et al. Finsearchcomp: Towards a realistic, expert-level evaluation of financial search and
+reasoning.arXiv preprint arXiv:2509.13160, 2025.
+[13]Carlos E Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir Press, and Karthik Narasimhan.
+Swe-bench: Can language models resolve real-world github issues?arXiv preprint arXiv:2310.06770, 2023.
+[14]Saurav Kadavath, Tom Conerly, Amanda Askell, Tom Henighan, Dawn Drain, Ethan Perez, Nicholas Schiefer, Zac
+Hatfield-Dodds, Nova DasSarma, Eli Tran-Johnson, Scott Johnston, Sheer El Showk, Andy Jones, Nelson Elhage,
+Tristan Hume, Anna Chen, Yuntao Bai, Sam Bowman, Stanislav Fort, Deep Ganguli, Danny Hernandez, Josh
+Jacobson, Jackson Kernion, Shauna Kravec, Liane Lovitt, Kamal Ndousse, Catherine Olsson, Sam Ringer, Dario
+Amodei, Tom Brown, Jack Clark, Nicholas Joseph, Ben Mann, Sam McCandlish, Chris Olah, and Jared Kaplan.
+Language models (mostly) know what they know.CoRR, abs/2207.05221, 2022. doi: 10.48550/ARXIV.2207.05221.
+URLhttps://doi.org/10.48550/arXiv.2207.05221.
+[15]Adam Tauman Kalai and Santosh S. Vempala. Calibrated language models must hallucinate. In Bojan Mohar, Igor
+Shinkar, and Ryan O’Donnell, editors,Proceedings of the 56th Annual ACM Symposium on Theory of Computing,
+STOC 2024, Vancouver, BC, Canada, June 24-28, 2024, pages160–171. ACM, 2024. doi: 10.1145/3618260.3649777.
+URLhttps://doi.org/10.1145/3618260.3649777.
+[16]Adam Tauman Kalai, Ofir Nachum, Santosh S. Vempala, and Edwin Zhang. Why language models hallucinate.
+CoRR, abs/2509.04664, 2025. doi: 10.48550/ARXIV.2509.04664. URL https://doi.org/10.48550/arXiv.2509.
+04664.
+17
+
+[17]Sanyam Kapoor, Nate Gruver, Manley Roberts, Arka Pal, Samuel Dooley, Micah Goldblum, and Andrew Wilson.
+Calibration-tuning: Teaching large language models to know what they don’t know. InProceedings of the 1st
+Workshop on Uncertainty-Aware NLP (UncertaiNLP 2024), pages 1–14, 2024.
+[18]Stephanie Lin, Jacob Hilton, and Owain Evans. Teaching models to express their uncertainty in words.Trans.
+Mach. Learn. Res., 2022, 2022. URLhttps://openreview.net/forum?id=8s8K2UZGTZ.
+[19]Xiaoyuan Liu, Tian Liang, Zhiwei He, Jiahao Xu, Wenxuan Wang, Pinjia He, Zhaopeng Tu, Haitao Mi, and
+Dong Yu. Trust, but verify: A self-verification approach to reinforcement learning with verifiable rewards.CoRR,
+abs/2505.13445, 2025. doi: 10.48550/ARXIV.2505.13445. URL https://doi.org/10.48550/arXiv.2505.13445 .
+[20]Xin Liu, Muhammad Khalifa, and Lu Wang. Litcab: Lightweight language model calibration over short- and
+long-form responses. InThe Twelfth International Conference on Learning Representations, ICLR 2024, Vienna,
+Austria, May 7-11, 2024. OpenReview.net, 2024. URLhttps://openreview.net/forum?id=jH67LHVOIO.
+[21]Preetum Nakkiran, Arwen Bradley, Adam Golinski, Eugène Ndiaye, Michael Kirchhof, and Sinead Williamson.
+Trained on tokens, calibrated on concepts: The emergence of semantic calibration in llms.CoRR, abs/2511.04869,
+2025. doi: 10.48550/ARXIV.2511.04869. URLhttps://doi.org/10.48550/arXiv.2511.04869.
+[22]OpenAI. Gpt-5 system card. Technical report, OpenAI, 2025. URL https://openai.com/index/
+gpt-5-system-card/.
+[23]OpenAI. gpt-oss-120b & gpt-oss-20b model card.CoRR, abs/2508.10925, 2025. doi: 10.48550/ARXIV.2508.10925.
+URLhttps://doi.org/10.48550/arXiv.2508.10925.
+[24]OpenAI. Openai o3 and o4-mini system card. Technical report, OpenAI, 2025. URL https://openai.com/index/
+o3-o4-mini-system-card/.
+[25] Yudi Pawitan and Chris Holmes. Confidence in the reasoning of large language models.CoRR, abs/2412.15296,
+2024. doi: 10.48550/ARXIV.2412.15296. URLhttps://doi.org/10.48550/arXiv.2412.15296.
+[26]Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Mingchuan Zhang, Y. K. Li, Y. Wu, and
+Daya Guo. Deepseekmath: Pushing the limits of mathematical reasoning in open language models.CoRR,
+abs/2402.03300, 2024. doi: 10.48550/ARXIV.2402.03300. URL https://doi.org/10.48550/arXiv.2402.03300 .
+[27]Paul Stangel, David Bani-Harouni, Chantal Pellegrini, Ege Özsoy, Kamilia Zaripova, Matthias Keicher, and Nassir
+Navab. Rewarding doubt: A reinforcement learning approach to calibrated confidence expression of large language
+models.arXiv preprint arXiv:2503.02623, 2025.
+[28]Amir Taubenfeld, Tom Sheffer, Eran Ofek, Amir Feder, Ariel Goldstein, Zorik Gekhman, and Gal Yona.
+Confidence improves self-consistency in llms. In Wanxiang Che, Joyce Nabende, Ekaterina Shutova, and
+Mohammad Taher Pilehvar, editors,Findings of the Association for Computational Linguistics, ACL 2025,
+Vienna, Austria, July 27 - August 1, 2025, pages 20090–20111. Association for Computational Linguistics, 2025.
+URLhttps://aclanthology.org/2025.findings-acl.1030/.
+[29]Kimi Team, Yifan Bai, Yiping Bao, Guanduo Chen, Jiahao Chen, Ningxin Chen, Ruijue Chen, Yanru Chen,
+Yuankun Chen, Yutian Chen, et al. Kimi k2: Open agentic intelligence.arXiv preprint arXiv:2507.20534, 2025.
+[30] Qwen Team. Qwen3 technical report, 2025. URLhttps://arxiv.org/abs/2505.09388.
+[31]Jason Wei, Nguyen Karina, Hyung Won Chung, Yunxin Joy Jiao, Spencer Papay, Amelia Glaese, John Schulman,
+and William Fedus. Measuring short-form factuality in large language models.CoRR, abs/2411.04368, 2024. doi:
+10.48550/ARXIV.2411.04368. URLhttps://doi.org/10.48550/arXiv.2411.04368.
+[32]xAI. Grok4modelcard. Technicalreport, xAI,2025. URL https://data.x.ai/2025-08-20-grok-4-model-card.
+pdf.
+[33]Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Tiantian Fan, Gaohong Liu, Lingjun
+Liu, Xin Liu, Haibin Lin, Zhiqi Lin, Bole Ma, Guangming Sheng, Yuxuan Tong, Chi Zhang, Mofan Zhang, Wang
+Zhang, Hang Zhu, Jinhua Zhu, Jiaze Chen, Jiangjie Chen, Chengyi Wang, Hongli Yu, Weinan Dai, Yuxuan Song,
+Xiangpeng Wei, Hao Zhou, Jingjing Liu, Wei-Ying Ma, Ya-Qin Zhang, Lin Yan, Mu Qiao, Yonghui Wu, and
+Mingxuan Wang. DAPO: an open-source LLM reinforcement learning system at scale.CoRR, abs/2503.14476,
+2025. doi: 10.48550/ARXIV.2503.14476. URLhttps://doi.org/10.48550/arXiv.2503.14476.
+[34]Aohan Zeng, Xin Lv, Qinkai Zheng, Zhenyu Hou, Bin Chen, Chengxing Xie, Cunxiang Wang, Da Yin, Hao Zeng,
+Jiajie Zhang, Kedong Wang, Lucen Zhong, Mingdao Liu, Rui Lu, Shulin Cao, Xiaohan Zhang, Xuancheng Huang,
+18
+
+Yao Wei, Yean Cheng, Yifan An, Yilin Niu, Yuanhao Wen, Yushi Bai, Zhengxiao Du, Zihan Wang, Zilin Zhu,
+Bohan Zhang, Bosi Wen, Bowen Wu, Bowen Xu, Can Huang, Casey Zhao, Changpeng Cai, Chao Yu, Chen Li,
+Chendi Ge, Chenghua Huang, Chenhui Zhang, Chenxi Xu, Chenzheng Zhu, Chuang Li, Congfeng Yin, Daoyan
+Lin, Dayong Yang, Dazhi Jiang, Ding Ai, Erle Zhu, Fei Wang, Gengzheng Pan, Guo Wang, Hailong Sun, Haitao
+Li, Haiyang Li, Haiyi Hu, Hanyu Zhang, Hao Peng, Hao Tai, Haoke Zhang, Haoran Wang, Haoyu Yang, He Liu,
+He Zhao, Hongwei Liu, Hongxi Yan, Huan Liu, Huilong Chen, Ji Li, Jiajing Zhao, Jiamin Ren, Jian Jiao, Jiani
+Zhao, Jianyang Yan, Jiaqi Wang, Jiayi Gui, Jiayue Zhao, Jie Liu, Jijie Li, Jing Li, Jing Lu, Jingsen Wang, Jingwei
+Yuan, Jingxuan Li, Jingzhao Du, Jinhua Du, Jinxin Liu, Junkai Zhi, Junli Gao, Ke Wang, Lekang Yang, Liang
+Xu, Lin Fan, Lindong Wu, Lintao Ding, Lu Wang, Man Zhang, Minghao Li, Minghuan Xu, Mingming Zhao, and
+Mingshu Zhai. GLM-4.5: agentic, reasoning, and coding (ARC) foundation models.CoRR, abs/2508.06471, 2025.
+doi: 10.48550/ARXIV.2508.06471. URLhttps://doi.org/10.48550/arXiv.2508.06471.
+[35]Zhiyuan Zeng, Jiashuo Liu, Siyuan Chen, Tianci He, Yali Liao, Yixiao Tian, Jinpeng Wang, Zaiyuan Wang,
+Yang Yang, Lingyue Yin, et al. Futurex: An advanced live benchmark for llm agents in future prediction.arXiv
+preprint arXiv:2508.11987, 2025.
+[36]Kaiwen Zha, Zhengqi Gao, Maohao Shen, Zhang-Wei Hong, Duane S. Boning, and Dina Katabi. RL tango:
+Reinforcing generator and verifier together for language reasoning.CoRR, abs/2505.15034, 2025. doi: 10.48550/
+ARXIV.2505.15034. URLhttps://doi.org/10.48550/arXiv.2505.15034.
+[37]Xiaoling Zhou, Mingjie Zhang, Zhemg Lee, Wei Ye, and Shikun Zhang. Hademif: Hallucination detection and
+mitigation in large language models. InThe Thirteenth International Conference on Learning Representations,
+ICLR 2025, Singapore, April 24-28, 2025. OpenReview.net, 2025. URL https://openreview.net/forum?id=
+VwOYxPScxB.
+19

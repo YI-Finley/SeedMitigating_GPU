@@ -1,0 +1,11 @@
+# Install PyTorch separately inside the dedicated GPU virtualenv.
+# Example:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+-r verl/requirements.txt
+
+matplotlib
+openai
+scikit-learn
+sentencepiece
+tqdm

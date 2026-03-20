@@ -1,0 +1,83 @@
+Loading Llama 3.1-8B-Instruct tokenizer...
+
+=== Tokenization Analysis for train ===
+
+
+>>>>>>>>>>>>>>> Example 0:
+  Prompt: You are given a Question, References and the time when it was asked in the Pacific Time Zone (PT), r...
+  Token length: 14337
+  Tokens: [2675, 527, 2728, 264, 16225, 11, 45178, 323, 279, 892]...
+
+
+
+>>>>>>>>>>>>>>> Example 1:
+  Prompt: You are given a Question, References and the time when it was asked in the Pacific Time Zone (PT), r...
+  Token length: 6537
+  Tokens: [2675, 527, 2728, 264, 16225, 11, 45178, 323, 279, 892]...
+
+
+
+>>>>>>>>>>>>>>> Example 2:
+  Prompt: You are given a Question, References and the time when it was asked in the Pacific Time Zone (PT), r...
+  Token length: 14336
+  Tokens: [2675, 527, 2728, 264, 16225, 11, 45178, 323, 279, 892]...
+
+Prompt Length Statistics for train:
+  Average length: 10051.25 tokens
+  Maximum length: 14337 tokens
+  Minimum length: 227 tokens
+  Median length: 14328.00 tokens
+  Standard deviation: 5276.17 tokens
+  Total examples: 597
+
+Length Distribution for train:
+  0-100 tokens: 0 examples (0.0%)
+  101-200 tokens: 0 examples (0.0%)
+  201-300 tokens: 30 examples (5.0%)
+  301-400 tokens: 0 examples (0.0%)
+  401-500 tokens: 0 examples (0.0%)
+  501-1000 tokens: 15 examples (2.5%)
+  1001-∞ tokens: 552 examples (92.5%)
+  Length distribution plot saved to: /fsx_0/user/zhepei/projects/verl/data/crag/train_prompt_length_distribution.png
+
+=== Tokenization Analysis for test ===
+
+
+>>>>>>>>>>>>>>> Example 0:
+  Prompt: You are given a Question, References and the time when it was asked in the Pacific Time Zone (PT), r...
+  Token length: 230
+  Tokens: [2675, 527, 2728, 264, 16225, 11, 45178, 323, 279, 892]...
+
+
+
+>>>>>>>>>>>>>>> Example 1:
+  Prompt: You are given a Question, References and the time when it was asked in the Pacific Time Zone (PT), r...
+  Token length: 11129
+  Tokens: [2675, 527, 2728, 264, 16225, 11, 45178, 323, 279, 892]...
+
+
+
+>>>>>>>>>>>>>>> Example 2:
+  Prompt: You are given a Question, References and the time when it was asked in the Pacific Time Zone (PT), r...
+  Token length: 14330
+  Tokens: [2675, 527, 2728, 264, 16225, 11, 45178, 323, 279, 892]...
+
+Prompt Length Statistics for test:
+  Average length: 9913.81 tokens
+  Maximum length: 14338 tokens
+  Minimum length: 223 tokens
+  Median length: 13584.00 tokens
+  Standard deviation: 5349.85 tokens
+  Total examples: 643
+
+Length Distribution for test:
+  0-100 tokens: 0 examples (0.0%)
+  101-200 tokens: 0 examples (0.0%)
+  201-300 tokens: 34 examples (5.3%)
+  301-400 tokens: 2 examples (0.3%)
+  401-500 tokens: 0 examples (0.0%)
+  501-1000 tokens: 25 examples (3.9%)
+  1001-∞ tokens: 582 examples (90.5%)
+  Length distribution plot saved to: /fsx_0/user/zhepei/projects/verl/data/crag/test_prompt_length_distribution.png
+
+Tokenization statistics saved to: /fsx_0/user/zhepei/projects/verl/data/crag/tokenization_stats.json
